@@ -8,9 +8,16 @@ from streamlit_gsheets import GSheetsConnection
 
 # --- BANCO DE DADOS SIMULADO ---
 funcionarios_db = {
-    "Arnaldo Calebe (Operacional)": "1234",
-    "Carlos (Operacional)": "5678",
-    "Ana (Manutenção)": "9012"
+    "Arnaldo Calebe": "1234",
+    "Alan": "5678",
+    "Gustavo Henrick": "9012",
+    "Thaynna Yara": "3456",
+    "Rafael": "7890",
+    "Felipe": "2345",
+    "Marcel": "6789",
+    "Luismar": "0123",
+    "Renato": "4567",
+    "Teste": "0000"
 }
 
 st.set_page_config(page_title="Saída de Materiais - SAE", layout="centered")
