@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+import cv2
 import re
 from datetime import datetime
 from PIL import Image, ImageOps
@@ -30,32 +32,58 @@ tipo_item = st.radio("Selecione o Item:", ["Hidrômetro", "Lacre"])
 
 foto_capturada = st.camera_input("Tire a foto da etiqueta")
 
+def pre_processar_imagem(img_pil):
+    """Aplica escala de cinza, aumento de contraste e threshold para melhorar OCR."""
+    img_np = np.array(img_pil)
+    if len(img_np.shape) == 3:
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = img_np
+    # Redimensiona para melhorar leitura de caracteres pequenos
+    gray = cv2.resize(gray, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    # Binarização com Otsu Thresholding
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return gray, thresh
+
 def extrair_serial_especifico(imagem_pil, tipo):
-    # Tentativa 1: Decodificar código de barras em 4 rotações
+    # Tentativa 1: Decodificar código de barras (priorizando o do topo)
     for angulo in [0, 90, 180, 270]:
         img_rot = imagem_pil.rotate(angulo, expand=True)
         barcodes = decode(img_rot)
-        for b in barcodes:
-            texto = b.data.decode('utf-8').strip()
-            if tipo == "Hidrômetro" and re.search(r'Z\d{2}[A-Z]{2}\d+', texto, re.I):
-                return re.search(r'Z\d{2}[A-Z]{2}\d+', texto, re.I).group(0).upper()
-            if tipo == "Lacre" and re.search(r'\d{2}[A-Z]\d{6,}', texto, re.I):
-                return re.search(r'\d{2}[A-Z]\d{6,}', texto, re.I).group(0).upper()
+        if barcodes:
+            # Ordena os códigos da parte superior para a inferior da foto
+            barcodes = sorted(barcodes, key=lambda b: b.rect.top)
+            for b in barcodes:
+                texto = b.data.decode('utf-8').strip()
+                if tipo == "Hidrômetro" and re.search(r'Z\d{2}[A-Z]{2}\d+', texto, re.I):
+                    return re.search(r'Z\d{2}[A-Z]{2}\d+', texto, re.I).group(0).upper()
+                if tipo == "Lacre" and re.search(r'\d{2}[A-Z]\d{6,}', texto, re.I):
+                    return re.search(r'\d{2}[A-Z]\d{6,}', texto, re.I).group(0).upper()
 
-    # Tentativa 2: OCR com correção de orientação e escala de cinza
-    img_gray = ImageOps.grayscale(imagem_pil)
-    for angulo in [0, 90, 270]:
-        img_rot = img_gray.rotate(angulo, expand=True)
-        texto_ocr = pytesseract.image_to_string(img_rot)
-        
-        if tipo == "Hidrômetro":
-            match = re.search(r'(Z26BR\d{7,8}|[A-Z0-9]{2,4}BR\d{6,8}|\d{7})', texto_ocr, re.I)
-            if match:
-                return match.group(0).upper()
-        else:
-            match = re.search(r'(\d{2}[A-Z]\d{6,7})', texto_ocr, re.I)
-            if match:
-                return match.group(0).upper()
+    # Tentativa 2: OCR com tratamento de imagem (ideal para etiqueta sem código de barras)
+    gray_img, thresh_img = pre_processar_imagem(imagem_pil)
+    
+    versoes_imagem = [
+        Image.fromarray(gray_img),
+        Image.fromarray(thresh_img),
+        imagem_pil
+    ]
+    
+    for base_img in versoes_imagem:
+        for angulo in [0, 90, 270]:
+            img_rot = base_img.rotate(angulo, expand=True)
+            # OCR com PSM 6 (assume bloco uniforme de texto)
+            texto_ocr = pytesseract.image_to_string(img_rot, config='--psm 6')
+            
+            if tipo == "Lacre":
+                # Procura padrões como "25A022801" ou textos após "NUMERADO:"
+                match_lacre = re.search(r'(\d{2}[A-Z0-9]\d{6,7})', texto_ocr, re.I)
+                if match_lacre:
+                    return match_lacre.group(0).upper().replace(' ', '')
+            else:
+                match_hidro = re.search(r'(Z\d{2}[A-Z]{2}\d{7,8}|[A-Z0-9]{2,4}BR\d{6,8}|\d{7})', texto_ocr, re.I)
+                if match_hidro:
+                    return match_hidro.group(0).upper().replace(' ', '')
     return ""
 
 serial_detectado = ""
@@ -68,7 +96,12 @@ if foto_capturada is not None:
         st.warning("Código não detectado automaticamente. Você pode digitar abaixo.")
 
 serial_inicial = st.text_input("Serial Inicial:", value=serial_detectado)
-quantidade = st.number_input("Quantidade Retirada", min_value=1, max_value=1000, value=10 if tipo_item == "Hidrômetro" else 100)
+quantidade = st.number_input(
+    "Quantidade Retirada", 
+    min_value=1, 
+    max_value=1000, 
+    value=10 if tipo_item == "Hidrômetro" else 100
+)
 
 # --- 3. GRAVAÇÃO ---
 if st.button("Registrar Saída"):
