@@ -33,25 +33,44 @@ tipo_item = st.radio("Selecione o Item:", ["Hidrômetro", "Lacre"])
 foto_capturada = st.camera_input("Tire a foto da etiqueta")
 
 def pre_processar_imagem(img_pil):
-    """Aplica escala de cinza, aumento de contraste e threshold para melhorar OCR."""
     img_np = np.array(img_pil)
     if len(img_np.shape) == 3:
         gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     else:
         gray = img_np
-    # Redimensiona para melhorar leitura de caracteres pequenos
     gray = cv2.resize(gray, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-    # Binarização com Otsu Thresholding
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return gray, thresh
 
+def tratar_leitura_lacre(texto_ocr):
+    # 1. Procura o padrão perfeito: 2 dígitos + Letra A-Z + 6 a 7 dígitos (ex: 25A022801)
+    match_perfeito = re.findall(r'\b(\d{2}[A-Za-z]\d{6,7})\b', texto_ocr)
+    if match_perfeito:
+        return match_perfeito[0].upper()
+
+    # 2. Busca após o bloco "NUMERADO" mesmo com quebra de linha ou espaço
+    match_bloco = re.search(r'NUMERAD[O0]?[:\s]*([A-Z0-9]{8,11})', texto_ocr, re.IGNORECASE)
+    if match_bloco:
+        candidato = match_bloco.group(1).upper()
+        # Se tiver 9 dígitos e o 3º caractere foi lido como número ('0' ou '4'), corrige para 'A'
+        if len(candidato) >= 9 and candidato[2].isdigit():
+            candidato = candidato[:2] + 'A' + candidato[3:9]
+        return candidato
+
+    # 3. Se achou sequência numérica de 9 dígitos iniciada por 24, 25 ou 26, reconstrói o prefixo 'A'
+    match_numerico = re.findall(r'\b(2[3-7])([04])(\d{6})\b', texto_ocr)
+    if match_numerico:
+        ano, _, resto = match_numerico[0]
+        return f"{ano}A{resto}"
+
+    return ""
+
 def extrair_serial_especifico(imagem_pil, tipo):
-    # Tentativa 1: Decodificar código de barras (priorizando o do topo)
+    # Tentativa 1: Barcode / QR Code
     for angulo in [0, 90, 180, 270]:
         img_rot = imagem_pil.rotate(angulo, expand=True)
         barcodes = decode(img_rot)
         if barcodes:
-            # Ordena os códigos da parte superior para a inferior da foto
             barcodes = sorted(barcodes, key=lambda b: b.rect.top)
             for b in barcodes:
                 texto = b.data.decode('utf-8').strip()
@@ -60,26 +79,19 @@ def extrair_serial_especifico(imagem_pil, tipo):
                 if tipo == "Lacre" and re.search(r'\d{2}[A-Z]\d{6,}', texto, re.I):
                     return re.search(r'\d{2}[A-Z]\d{6,}', texto, re.I).group(0).upper()
 
-    # Tentativa 2: OCR com tratamento de imagem (ideal para etiqueta sem código de barras)
+    # Tentativa 2: OCR
     gray_img, thresh_img = pre_processar_imagem(imagem_pil)
-    
-    versoes_imagem = [
-        Image.fromarray(gray_img),
-        Image.fromarray(thresh_img),
-        imagem_pil
-    ]
-    
+    versoes_imagem = [Image.fromarray(gray_img), Image.fromarray(thresh_img), imagem_pil]
+
     for base_img in versoes_imagem:
         for angulo in [0, 90, 270]:
             img_rot = base_img.rotate(angulo, expand=True)
-            # OCR com PSM 6 (assume bloco uniforme de texto)
-            texto_ocr = pytesseract.image_to_string(img_rot, config='--psm 6')
-            
+            texto_ocr = pytesseract.image_to_string(img_rot)
+
             if tipo == "Lacre":
-                # Procura padrões como "25A022801" ou textos após "NUMERADO:"
-                match_lacre = re.search(r'(\d{2}[A-Z0-9]\d{6,7})', texto_ocr, re.I)
-                if match_lacre:
-                    return match_lacre.group(0).upper().replace(' ', '')
+                lacre_encontrado = tratar_leitura_lacre(texto_ocr)
+                if lacre_encontrado:
+                    return lacre_encontrado
             else:
                 match_hidro = re.search(r'(Z\d{2}[A-Z]{2}\d{7,8}|[A-Z0-9]{2,4}BR\d{6,8}|\d{7})', texto_ocr, re.I)
                 if match_hidro:
