@@ -10,9 +10,15 @@ from pyzbar.pyzbar import decode
 from streamlit_gsheets import GSheetsConnection
 
 funcionarios_db = {
-    "Arnaldo Calebe (Operacional)": "1234",
-    "Carlos (Operacional)": "5678",
-    "Ana (Manutenção)": "9012"
+    "ALAN SANTOS OLIVEIRA": "1111",
+    "ARNALDO CALEBE OLIVEIRA GARCIA": "2222",
+    "FELIPE FRANCO GUIMARAES": "3333",
+    "FERNANDO HENRIQUE DOS SANTOS SILVA": "4444",
+    "GUSTAVO ENRICK FRANCO": "5555",
+    "LUISMAR JOSE GARCIA": "6666",
+    "MARCEL SILVA DE ALMEIDA": "7777",
+    "RAFAEL NOGUEIRA DA SILVA": "8888",
+    "RENATO CARDOSO DOS SANTOS": "9999"
 }
 
 st.set_page_config(page_title="Saída de Materiais - SAE", layout="centered")
